@@ -74,7 +74,11 @@ native_formatter_evidence() {
             printf 'Native formatter: newfs_exfat (%s)\n' "$(sw_vers -productVersion)"
             ;;
         Linux)
-            mkfs.exfat -V >&2
+            # exfatprogs 1.2.2 prints its version with status 1. Formatting below
+            # remains a separate command whose failure always stops the test.
+            local version_status=0
+            mkfs.exfat -V >&2 || version_status=$?
+            [ "$version_status" -le 1 ]
             ;;
     esac
 }
