@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "exfat-rescue"
+version = "0.2.0rc1"
+description = "Read-only exFAT disk-image metadata scanner and safe recovery tool"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{name = "exfat-rescue contributors"}]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: System :: Recovery Tools",
+]
+keywords = ["exfat", "data-recovery", "disk-image", "sd-card", "usb-drive", "macos", "linux"]
+
+[project.urls]
+Homepage = "https://github.com/MrJeffrey/exfat-rescue"
+Repository = "https://github.com/MrJeffrey/exfat-rescue"
+Issues = "https://github.com/MrJeffrey/exfat-rescue/issues"
+Changelog = "https://github.com/MrJeffrey/exfat-rescue/blob/main/CHANGELOG.md"
+Security = "https://github.com/MrJeffrey/exfat-rescue/security/policy"
+Upstream = "https://github.com/desmondmanoj21-cmd/sd-recovery"
+
+[project.optional-dependencies]
+dev = [
+  "build==1.6.0",
+  "coverage==7.16.0",
+  "jsonschema==4.26.0",
+  "ruff==0.16.5",
+  "twine==7.0.0",
+]
+
+[project.scripts]
+exfat-rescue = "exfat_rescue.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/exfat_rescue"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.coverage.run]
+branch = true
+source = ["exfat_rescue"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true

@@ -1,0 +1,387 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/MrJeffrey/exfat-rescue/main/src/exfat_rescue/schemas/manifest-v2.json",
+  "title": "exfat-rescue JSONL record v2",
+  "description": "Strict recovery-plan manifest records. The reader additionally validates JSONL framing, record order, completion hashing, source geometry, candidate IDs, and recovery-plan semantics.",
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "nonnegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "image_size_bytes",
+        "volume_offset_bytes",
+        "volume_length_bytes",
+        "volume_sha256",
+        "cluster_size_bytes",
+        "cluster_heap_offset_bytes",
+        "source_kind",
+        "boot_region",
+        "volume_dirty",
+        "media_failure"
+      ],
+      "properties": {
+        "image_size_bytes": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "volume_offset_bytes": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "volume_length_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "volume_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "cluster_size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cluster_heap_offset_bytes": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "source_kind": {
+          "enum": [
+            "direct-image",
+            "mbr",
+            "gpt"
+          ]
+        },
+        "boot_region": {
+          "enum": [
+            "primary",
+            "backup"
+          ]
+        },
+        "volume_dirty": {
+          "type": "boolean"
+        },
+        "media_failure": {
+          "type": "boolean"
+        }
+      }
+    },
+    "scanOptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "orphan_scan",
+        "version",
+        "volume_offset_bytes",
+        "source_kind",
+        "boot_region",
+        "max_candidates",
+        "max_scan_clusters",
+        "max_fat_steps"
+      ],
+      "properties": {
+        "orphan_scan": {
+          "const": true
+        },
+        "version": {
+          "const": 2
+        },
+        "volume_offset_bytes": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "source_kind": {
+          "enum": [
+            "direct-image",
+            "mbr",
+            "gpt"
+          ]
+        },
+        "boot_region": {
+          "enum": [
+            "primary",
+            "backup"
+          ]
+        },
+        "max_candidates": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500000
+        },
+        "max_scan_clusters": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_fat_steps": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "sourceCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry_offset",
+        "name",
+        "size_bytes",
+        "valid_size_bytes",
+        "first_cluster",
+        "no_fat_chain",
+        "deleted",
+        "location",
+        "entry_set_sha256",
+        "is_directory",
+        "attributes",
+        "entry_checksum"
+      ],
+      "properties": {
+        "entry_offset": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "name": {
+          "type": "string"
+        },
+        "size_bytes": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "valid_size_bytes": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "first_cluster": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "no_fat_chain": {
+          "type": "boolean"
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "location": {
+          "enum": [
+            "directory",
+            "orphan"
+          ]
+        },
+        "entry_set_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "is_directory": {
+          "const": false
+        },
+        "attributes": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "entry_checksum": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{4}$"
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_type",
+        "format",
+        "version",
+        "schema",
+        "source",
+        "scan_options",
+        "candidate_count",
+        "warnings"
+      ],
+      "properties": {
+        "record_type": {
+          "const": "manifest"
+        },
+        "format": {
+          "const": "exfat-rescue.manifest"
+        },
+        "version": {
+          "const": 2
+        },
+        "schema": {
+          "const": "https://raw.githubusercontent.com/MrJeffrey/exfat-rescue/main/src/exfat_rescue/schemas/manifest-v2.json"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "scan_options": {
+          "$ref": "#/$defs/scanOptions"
+        },
+        "candidate_count": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_type",
+        "candidate_id",
+        "entry_offset",
+        "entry_set_sha256",
+        "name",
+        "logical_size_bytes",
+        "valid_data_bytes",
+        "extents",
+        "allocation_mode",
+        "metadata_location",
+        "disposition",
+        "recovery_basis",
+        "reasons",
+        "source_candidate"
+      ],
+      "properties": {
+        "record_type": {
+          "const": "candidate"
+        },
+        "candidate_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "entry_offset": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "entry_set_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "name": {
+          "type": "string"
+        },
+        "logical_size_bytes": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "valid_data_bytes": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "extents": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "first_cluster",
+              "cluster_count"
+            ],
+            "properties": {
+              "first_cluster": {
+                "type": "integer",
+                "minimum": 2
+              },
+              "cluster_count": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        },
+        "allocation_mode": {
+          "enum": [
+            "empty",
+            "contiguous",
+            "fat_chain"
+          ]
+        },
+        "metadata_location": {
+          "enum": [
+            "active_directory",
+            "deleted_directory",
+            "orphan"
+          ]
+        },
+        "disposition": {
+          "enum": [
+            "recoverable",
+            "conflicted",
+            "unrecoverable"
+          ]
+        },
+        "recovery_basis": {
+          "enum": [
+            null,
+            "active_contiguous_allocated",
+            "active_fat_chain_allocated",
+            "active_empty",
+            "deleted_contiguous_unallocated",
+            "deleted_fat_chain_unallocated",
+            "deleted_empty",
+            "orphan_contiguous_unallocated",
+            "orphan_fat_chain_unallocated",
+            "orphan_empty"
+          ]
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "active_bitmap_allocation_conflict",
+              "active_bitmap_unavailable",
+              "active_file_overlap",
+              "active_owner_conflict",
+              "cluster_currently_allocated",
+              "contiguous_extent_outside_volume",
+              "extent_limit",
+              "fat_bad_cluster",
+              "fat_cycle",
+              "fat_invalid_next",
+              "fat_overlong_chain",
+              "fat_short_chain",
+              "fat_truncated_read",
+              "fat_work_limit",
+              "incomplete_active_metadata",
+              "incomplete_active_ownership",
+              "invalid_valid_data_length",
+              "orphan_metadata_host_allocated",
+              "ownership_work_limit",
+              "plausible_recovery_overlap"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "source_candidate": {
+          "$ref": "#/$defs/sourceCandidate"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_type",
+        "candidate_count",
+        "content_record_count",
+        "content_sha256"
+      ],
+      "properties": {
+        "record_type": {
+          "const": "complete"
+        },
+        "candidate_count": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "content_record_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "content_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  ]
+}

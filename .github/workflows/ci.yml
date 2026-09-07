@@ -1,0 +1,190 @@
+name: CI
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: ubuntu-latest
+            python: "3.12"
+          - os: ubuntu-latest
+            python: "3.13"
+          - os: ubuntu-latest
+            python: "3.14"
+          - os: macos-latest
+            python: "3.11"
+          - os: macos-latest
+            python: "3.14"
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install development tools
+        run: python -m pip install -e '.[dev]'
+      - name: Test with branch coverage
+        run: |
+          python -m coverage run -m unittest discover -s tests -v
+          python -m coverage report
+          python -m coverage report --include='*/planner.py' --fail-under=83
+          python -m coverage report --include='*/recovery.py' --fail-under=80
+          python -m coverage report --include='*/verification.py' --fail-under=84
+      - name: Check source quality
+        run: |
+          python -m compileall -q src tests
+          ruff check src tests
+          ruff format --check src tests
+      - name: Build and validate distributions
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_date_epoch="$(git log -1 --format=%ct)"
+          case "${source_date_epoch}" in
+            ''|*[!0-9]*)
+              echo "Unable to derive a numeric SOURCE_DATE_EPOCH from the checked-out commit." >&2
+              exit 1
+              ;;
+          esac
+          export SOURCE_DATE_EPOCH="${source_date_epoch}"
+          build_root="$(mktemp -d "${RUNNER_TEMP}/exfat-rescue-build.XXXXXX")"
+          first_build="${build_root}/first"
+          second_build="${build_root}/second"
+          mkdir "${first_build}" "${second_build}"
+          python -m build --outdir "${first_build}"
+          python -m build --outdir "${second_build}"
+          shopt -s nullglob
+          first_wheels=("${first_build}"/*.whl)
+          second_wheels=("${second_build}"/*.whl)
+          first_sdists=("${first_build}"/*.tar.gz)
+          second_sdists=("${second_build}"/*.tar.gz)
+          if [[ ${#first_wheels[@]} -ne 1 || ${#second_wheels[@]} -ne 1 || \
+                ${#first_sdists[@]} -ne 1 || ${#second_sdists[@]} -ne 1 ]]; then
+            echo "Each build must produce exactly one wheel and one sdist." >&2
+            exit 1
+          fi
+          cmp "${first_wheels[0]}" "${second_wheels[0]}"
+          cmp "${first_sdists[0]}" "${second_sdists[0]}"
+          mkdir dist
+          cp "${first_wheels[0]}" "${first_sdists[0]}" dist/
+          python -m twine check --strict dist/*
+          python - <<'PY'
+          from __future__ import annotations
+
+          from pathlib import Path
+          import tarfile
+          import zipfile
+
+          dist = Path("dist")
+          expected = {
+              "LICENSE": Path("LICENSE").read_bytes(),
+              "NOTICE": Path("NOTICE").read_bytes(),
+          }
+
+          def required_member(names: list[str], suffix: str) -> str:
+              matches = [name for name in names if name.endswith(suffix)]
+              if len(matches) != 1:
+                  raise SystemExit(f"expected exactly one {suffix!r}, found {matches!r}")
+              return matches[0]
+
+          wheel = next(dist.glob("*.whl"))
+          with zipfile.ZipFile(wheel) as archive:
+              names = archive.namelist()
+              for name, contents in expected.items():
+                  member = required_member(names, f".dist-info/licenses/{name}")
+                  if archive.read(member) != contents:
+                      raise SystemExit(f"wheel {name} does not match the source file")
+              metadata_name = required_member(names, ".dist-info/METADATA")
+              metadata = archive.read(metadata_name).decode("utf-8")
+              if "License-Expression: Apache-2.0\n" not in metadata:
+                  raise SystemExit("wheel metadata does not declare Apache-2.0")
+
+          sdist = next(dist.glob("*.tar.gz"))
+          with tarfile.open(sdist, "r:gz") as archive:
+              names = archive.getnames()
+              for name, contents in expected.items():
+                  member = required_member(names, f"/{name}")
+                  extracted = archive.extractfile(member)
+                  if extracted is None or extracted.read() != contents:
+                      raise SystemExit(f"sdist {name} does not match the source file")
+          PY
+      - name: Test the built wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel_venv="$(mktemp -d "${RUNNER_TEMP}/exfat-rescue-wheel-venv.XXXXXX")"
+          clean_dir="$(mktemp -d "${RUNNER_TEMP}/exfat-rescue-wheel-test.XXXXXX")"
+          python -m venv "${wheel_venv}"
+          "${wheel_venv}/bin/python" -m pip install jsonschema==4.26.0
+          "${wheel_venv}/bin/python" -m pip install --no-index --no-deps dist/*.whl
+          cp -R tests "${clean_dir}/tests"
+          (
+            cd "${clean_dir}"
+            "${wheel_venv}/bin/exfat-rescue" --version
+            "${wheel_venv}/bin/python" -c \
+              'import exfat_rescue; print(exfat_rescue.__file__)'
+            "${wheel_venv}/bin/python" -m unittest discover -s tests -v
+          )
+
+  real-exfat-integration:
+    name: real exFAT / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            python: "3.11"
+          - os: macos-latest
+            python: "3.11"
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install Linux exFAT tooling
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          # The job is pinned to Ubuntu 24.04 above; use its signed archive's
+          # formatter and userspace driver without recommended desktop packages.
+          sudo apt-get install --yes --no-install-recommends exfat-fuse exfatprogs
+          dpkg-query --show --showformat='${Package} ${Version}\n' exfat-fuse exfatprogs
+      - name: Record macOS exFAT tooling
+        if: runner.os == 'macOS'
+        run: |
+          sw_vers
+          stat -f 'newfs_exfat size=%z modified_epoch=%m' /sbin/newfs_exfat
+          shasum -a 256 /sbin/newfs_exfat
+      - name: Install the package
+        run: python -m pip install -e .
+      - name: Recover from a disposable tool-formatted image
+        shell: bash
+        run: tests/integration_real_exfat.sh

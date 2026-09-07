@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/MrJeffrey/exfat-rescue/main/src/exfat_rescue/schemas/manifest-v1.json",
+  "title": "exfat-rescue JSONL record v1",
+  "description": "Each JSONL line is independently validated. Records intentionally reject undeclared fields to keep agent contracts stable; a new manifest version is required for incompatible changes.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_type",
+        "format",
+        "version",
+        "schema",
+        "source",
+        "scan_options",
+        "candidate_count",
+        "warnings"
+      ],
+      "properties": {
+        "record_type": {"const": "manifest"},
+        "format": {"const": "exfat-rescue.manifest"},
+        "version": {"const": 1},
+        "schema": {"type": "string"},
+        "candidate_count": {"type": "integer", "minimum": 0},
+        "warnings": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["algorithm", "value", "size_bytes"],
+          "description": "A sampled size/head/tail fingerprint, not full-file content verification.",
+          "properties": {
+            "algorithm": {"const": "sha256-size-head-tail-v1"},
+            "value": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "size_bytes": {"type": "integer", "minimum": 0}
+          }
+        },
+        "scan_options": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "orphan_scan",
+            "version",
+            "volume_offset_bytes",
+            "source_kind",
+            "boot_region",
+            "max_candidates",
+            "max_scan_clusters"
+          ],
+          "properties": {
+            "orphan_scan": {"const": true},
+            "version": {"const": 1},
+            "volume_offset_bytes": {"type": "integer", "minimum": 0},
+            "source_kind": {"enum": ["direct-image", "mbr", "gpt"]},
+            "boot_region": {"enum": ["primary", "backup"]},
+            "max_candidates": {"type": "integer", "minimum": 1},
+            "max_scan_clusters": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_type",
+        "candidate_id",
+        "location",
+        "path",
+        "path_components",
+        "entry_offset",
+        "name",
+        "size_bytes",
+        "valid_size_bytes",
+        "first_cluster",
+        "no_fat_chain",
+        "deleted",
+        "is_directory",
+        "attributes",
+        "modified_at",
+        "modified_utc_offset_minutes",
+        "entry_checksum",
+        "layout"
+      ],
+      "properties": {
+        "record_type": {"const": "candidate"},
+        "candidate_id": {"type": "string", "pattern": "^[0-9a-f]{24}$"},
+        "location": {"enum": ["directory", "orphan"]},
+        "path": {"type": ["string", "null"]},
+        "path_components": {
+          "type": ["array", "null"],
+          "items": {"type": "string", "minLength": 1}
+        },
+        "entry_offset": {"type": "integer", "minimum": 0},
+        "name": {"type": "string", "minLength": 1},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "valid_size_bytes": {"type": "integer", "minimum": 0},
+        "first_cluster": {"type": "integer", "minimum": 0},
+        "no_fat_chain": {"type": "boolean"},
+        "deleted": {"type": "boolean"},
+        "is_directory": {"type": "boolean"},
+        "attributes": {"type": "integer", "minimum": 0},
+        "modified_at": {
+          "type": ["string", "null"],
+          "description": "The exFAT local modification time. An RFC 3339 offset is present only when exFAT recorded one."
+        },
+        "modified_utc_offset_minutes": {
+          "type": ["integer", "null"],
+          "minimum": -960,
+          "maximum": 945
+        },
+        "entry_checksum": {"type": "string", "pattern": "^[0-9a-f]{4}$"},
+        "layout": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["first_cluster", "contiguous"],
+          "properties": {
+            "first_cluster": {"type": "integer", "minimum": 0},
+            "contiguous": {"type": "boolean"}
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_type",
+        "candidate_count",
+        "content_record_count",
+        "content_sha256"
+      ],
+      "properties": {
+        "record_type": {"const": "complete"},
+        "candidate_count": {"type": "integer", "minimum": 0},
+        "content_record_count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of records preceding this completion record: one manifest header plus every candidate."
+        },
+        "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  ]
+}
