@@ -9,7 +9,11 @@ from __future__ import annotations
 
 import ctypes
 import errno
-import fcntl
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - exercised by platform import tests
+    fcntl = None
 import hashlib
 import json
 import os
@@ -51,6 +55,7 @@ DEFAULT_RUN_LIMITS = {
     "max_scan_clusters": 50_000_000,
     "max_fat_steps": 10_000_000,
 }
+LOCKING_AVAILABLE = fcntl is not None
 SOURCE_FILE_STATE_FIELDS = {
     "device",
     "inode",
@@ -379,6 +384,20 @@ def _validate_plan(plan: Any) -> dict[str, Any]:
     return value
 
 
+def _recovery_result_counts(plans: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    """Return successful-run counts from the selected validated plan set."""
+    recovered = sum(plan["disposition"] == "recoverable" for plan in plans)
+    conflicted = sum(plan["disposition"] == "conflicted" for plan in plans)
+    unrecoverable = sum(plan["disposition"] == "unrecoverable" for plan in plans)
+    return {
+        "recovered_count": recovered,
+        "conflicted_count": conflicted,
+        "unrecoverable_count": unrecoverable,
+        "refused_count": conflicted + unrecoverable,
+        "failed_count": 0,
+    }
+
+
 def _validate_plan_geometry(
     plan: dict[str, Any], binding: Mapping[str, object]
 ) -> None:
@@ -605,6 +624,10 @@ def _open_dir(path: Path) -> int:
 
 def _lock_directory(fd: int, label: str) -> None:
     """Take the one writer lock that is held until this descriptor closes."""
+    if fcntl is None:
+        raise OutputError(
+            "Recovery directory locking is unavailable; exfat-rescue requires Linux or macOS."
+        )
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError as exc:
@@ -2443,6 +2466,7 @@ def _create_run(
                 "candidate_count": len(normalized),
                 "output_bytes": total,
                 "complete": True,
+                **_recovery_result_counts(normalized),
             }
         finally:
             for child_fd in reversed(child_fds):
@@ -2716,6 +2740,7 @@ def resume_recovery(
                 "complete": True,
                 "resumed": False,
                 "verified": verified["ok"],
+                **_recovery_result_counts(plans),
             }
         records_fd: int | None = None
         files_fd: int | None = None
@@ -3009,6 +3034,7 @@ def resume_recovery(
                 "output_bytes": output_bytes,
                 "complete": True,
                 "resumed": True,
+                **_recovery_result_counts(plans),
             }
         finally:
             if records_fd is not None:

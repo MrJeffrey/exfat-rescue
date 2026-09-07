@@ -3,6 +3,9 @@
 This document defines the recovery contract for the 0.2.0rc1 release candidate. The
 source image remains strictly read-only.
 Unsafe, ambiguous, unbounded, or unverifiable plans are refused rather than guessed.
+The supported platforms are Linux and macOS with Python 3.11 or newer. Help and version
+information remain available on other platforms; operational commands exit 2 with a
+clear unsupported-platform error before opening sources or creating output.
 
 ## Public commands
 
@@ -29,7 +32,11 @@ exfat-rescue export OUTPUT_DIRECTORY --destination NEW_DIRECTORY
 forbids a replacement manifest, candidate selection, or changed limits; the immutable
 run descriptor supplies them. Without `--manifest`, recovery performs a v2 scan and
 persists its manifest. Every requested candidate ID must exist exactly once. Duplicate
-or unknown selections fail before output-directory creation.
+or unknown selections fail before output-directory creation. With a supplied, structurally
+validated v2 manifest, malformed, duplicate, or unknown selections, excessive selected
+candidate counts, and excessive selected recoverable byte totals fail before the image
+scan. Passing this preflight never authorizes extraction: the complete current image
+inventory must still be scanned, compared, and globally replanned.
 
 All commands are noninteractive and telemetry-free. In JSON mode, a successful command
 emits exactly one JSON object on stdout. Invocation and operational errors emit exactly
@@ -64,6 +71,15 @@ output target.
 
 Planner dispositions are `recoverable`, `conflicted`, and `unrecoverable`. Terminal
 report dispositions are `recovered`, `conflicted`, and `unrecoverable`.
+
+Successful new and resumed recovery results retain `candidate_count` and `output_bytes`
+and include `recovered_count`, `refused_count`, `conflicted_count`, `unrecoverable_count`,
+and `failed_count`. These counts cover the run's selected candidates, including previously
+completed candidates on resume. `refused_count` is the sum of conflicted and unrecoverable
+candidates, and `candidate_count` equals recovered plus refused. Human output presents
+the same outcomes immediately. `failed_count` is zero for a completed run: operational
+failures abort the command with the existing nonzero error envelope, without a successful
+completion result or inferred partial counts. There is no terminal `failed` disposition.
 
 - `recovered` means the tool produced the complete logical byte stream dictated by one
   exact, currently validated metadata allocation plan. For deleted or orphaned metadata,
@@ -231,10 +247,14 @@ limit. `--max-selected-candidates` can explicitly raise that limit through the s
 500,000-candidate ceiling, subject to descriptor and report byte bounds; a manifest's
 recorded discovery limit is used when recovery, resume, or image-backed verification
 replans it.
-The default `--max-output-bytes` is 100 GiB. It is the overflow-safe sum of `DataLength`
+The default `--max-output-bytes` is 100 GiB (107374182400 bytes), disclosed in command
+help. It is the overflow-safe sum of `DataLength`
 for all selected plans whose preflight disposition is recoverable, including zero-filled
-bytes. Exceeding it exits 6 without creating output. Disk-space preflight is advisory;
-mid-run `ENOSPC` leaves a resumable incomplete run.
+bytes. Exceeding it exits 6 without creating output. With a supplied manifest, a total
+already exceeding this limit is rejected before scanning; successful preflight is followed
+by the same limit check on freshly validated plans. Refused candidates still count toward
+the selected-candidate limit but contribute no recoverable output bytes. Disk-space
+preflight is advisory; mid-run `ENOSPC` leaves a resumable incomplete run.
 
 An expected regular input/state object is opened nonblocking until its type proof, so a
 raced special-file replacement cannot stall the command. Recovered/exported content
@@ -389,6 +409,9 @@ Every recovery-basis class has an exact-byte positive test. Every refusal reason
 negative test. Fault injection proves safe resume at every durability boundary. Peak RSS
 is tested against substantially different logical file sizes with a fixed allowed delta.
 Release requires passing Linux/macOS CI, version-recorded tests with native exFAT
-formatters, reproducible wheel and sdist builds, and the recovery validation required for
-the exact release commit. A signed tag and release review are required before any public
+formatters, including a populated image that is quick-formatted again and must yield the
+exact known bytes of both a deleted file and a former active file. These cases use native
+filesystem writes and formatting, without manually rewriting allocation metadata. The
+release also requires reproducible wheel and sdist builds and the recovery validation
+required for the exact release commit. A signed tag and release review are required before any public
 package publication.

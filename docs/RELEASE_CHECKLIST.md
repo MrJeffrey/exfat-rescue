@@ -2,6 +2,8 @@
 
 1. Confirm the default branch is protected and every required CI job is green.
 2. Run the full hostile-input and synthetic-fixture suite on Linux and macOS.
+   Require exact-byte recovery from native quick-formatted images containing both deleted
+   and former active file metadata. Check the installed wheel's Windows refusal message.
 3. Derive a numeric `SOURCE_DATE_EPOCH` from the release commit, build the sdist and
    wheel twice, and byte-compare each pair. Run `twine check --strict`, inspect their
    contents, and install the wheel in a clean environment outside the source tree.

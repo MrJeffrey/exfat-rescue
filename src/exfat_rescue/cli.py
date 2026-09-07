@@ -16,6 +16,7 @@ from .errors import (
     ManifestError,
     OutputError,
     RescueError,
+    ResourceLimitError,
     UsageError,
     VerificationError,
 )
@@ -26,6 +27,7 @@ from .manifest import (
     DEFAULT_MAX_MANIFEST_RECORDS,
     MAX_MANIFEST_LINE_BYTES,
     SCHEMA_V2,
+    ManifestV2,
     parse_manifest_v2_bytes,
     read_manifest_v2,
     validate_manifest_plans,
@@ -40,6 +42,7 @@ from .recovery import (
     DEFAULT_MAX_OUTPUT_BYTES,
     DEFAULT_RUN_LIMITS,
     HARD_MAX_RECOVERY_CANDIDATES,
+    LOCKING_AVAILABLE,
     MAX_INTERNAL_MANIFEST_BYTES,
     MAX_RUN_BYTES,
     _bootstrap_name,
@@ -500,7 +503,12 @@ def _emit(payload: dict, as_json: bool) -> None:
             )
         elif payload["command"] == "recover":
             print(
-                f"Recovery complete: {payload['candidate_count']} candidate(s). Output: {payload['output']}"
+                "Recovery complete: "
+                f"{payload['recovered_count']} recovered, "
+                f"{payload['refused_count']} refused "
+                f"({payload['conflicted_count']} conflicted, "
+                f"{payload['unrecoverable_count']} unrecoverable), "
+                f"{payload['failed_count']} failed. Output: {payload['output']}"
             )
         elif payload["command"] == "export":
             print(
@@ -575,6 +583,48 @@ def _validate_cli_limits(args: argparse.Namespace) -> None:
             raise UsageError(f"{name} must be positive.")
 
 
+def _preflight_manifest_selection(
+    manifest: ManifestV2,
+    requested_ids: list[str],
+    *,
+    max_selected_candidates: int,
+    max_output_bytes: int,
+) -> list[str]:
+    """Reject manifest-evident recovery selection errors before scanning the image."""
+    plans = list(manifest.plans)
+    by_id = {plan.candidate_id: plan for plan in plans}
+    if len(by_id) != len(plans):
+        raise ManifestError("The manifest contains duplicate candidate IDs.")
+    selected = requested_ids or [plan.candidate_id for plan in plans]
+    if (
+        any(
+            not isinstance(candidate_id, str)
+            or len(candidate_id) != 64
+            or any(character not in "0123456789abcdef" for character in candidate_id)
+            for candidate_id in selected
+        )
+        or len(selected) != len(set(selected))
+        or any(candidate_id not in by_id for candidate_id in selected)
+    ):
+        raise UsageError(
+            "Candidate selection contains a malformed, unknown, or duplicate ID."
+        )
+    if len(selected) > max_selected_candidates:
+        raise ResourceLimitError(
+            "Selected recovery plans exceed the configured candidate limit."
+        )
+    output_bytes = sum(
+        by_id[candidate_id].logical_size_bytes
+        for candidate_id in selected
+        if by_id[candidate_id].disposition == "recoverable"
+    )
+    if output_bytes > max_output_bytes:
+        raise ResourceLimitError(
+            "Selected recoverable output exceeds --max-output-bytes."
+        )
+    return selected
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = _ArgumentParser(
         prog="exfat-rescue",
@@ -633,7 +683,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="recover only this full candidate ID; repeat to select more than one",
     )
     recover.add_argument(
-        "--max-output-bytes", type=int, help="maximum selected logical output bytes"
+        "--max-output-bytes",
+        type=int,
+        help=(
+            "maximum selected logical output bytes "
+            f"(default: {DEFAULT_MAX_OUTPUT_BYTES} bytes, 100 GiB)"
+        ),
     )
     recover.add_argument(
         "--max-candidates", type=int, help="maximum retained recovery candidates"
@@ -765,6 +820,10 @@ def main(argv: list[str] | None = None) -> int:
     reporter: _ProgressReporter | None = None
     try:
         args = build_parser().parse_args(arguments)
+        if sys.platform not in {"linux", "darwin"} or not LOCKING_AVAILABLE:
+            raise UsageError(
+                "exfat-rescue operations require Linux or macOS with directory locking support."
+            )
         _validate_cli_limits(args)
         if (
             args.command in {"scan", "recover"}
@@ -1038,6 +1097,7 @@ def main(argv: list[str] | None = None) -> int:
                     manifest = (
                         read_manifest_v2(args.manifest) if args.manifest else None
                     )
+                    selected: list[str] | None = None
                     if manifest is not None:
                         recorded_limit = manifest.header["scan_options"][
                             "max_candidates"
@@ -1050,6 +1110,12 @@ def main(argv: list[str] | None = None) -> int:
                                 "--max-candidates must match the manifest's recorded discovery limit."
                             )
                         max_candidates = recorded_limit
+                        selected = _preflight_manifest_selection(
+                            manifest,
+                            args.candidate_id,
+                            max_selected_candidates=max_selected_candidates,
+                            max_output_bytes=max_output_bytes,
+                        )
                     reporter.phase("scan-clusters")
                     scanned = scan(
                         source,
@@ -1101,9 +1167,10 @@ def main(argv: list[str] | None = None) -> int:
                             },
                             scanned.warnings,
                         )
-                    selected = args.candidate_id or [
-                        plan.candidate_id for plan in plans
-                    ]
+                    if selected is None:
+                        selected = args.candidate_id or [
+                            plan.candidate_id for plan in plans
+                        ]
                     reporter.phase("recover-candidates")
                     result = recover_plans(
                         source,

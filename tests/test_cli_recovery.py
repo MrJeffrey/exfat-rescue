@@ -108,6 +108,27 @@ class RecoveryCliTests(unittest.TestCase):
             resumed = json.loads(stdout)
             self.assertTrue(resumed["complete"])
             self.assertTrue(resumed["source_proof_reused"])
+            self.assertEqual(
+                {
+                    key: resumed[key]
+                    for key in (
+                        "candidate_count",
+                        "recovered_count",
+                        "conflicted_count",
+                        "unrecoverable_count",
+                        "refused_count",
+                        "failed_count",
+                    )
+                },
+                {
+                    "candidate_count": 3,
+                    "recovered_count": 2,
+                    "conflicted_count": 1,
+                    "unrecoverable_count": 0,
+                    "refused_count": 1,
+                    "failed_count": 0,
+                },
+            )
             self.assertEqual(resume_hash.call_count, 0)
 
             state = source.stat()
@@ -391,6 +412,173 @@ class RecoveryCliTests(unittest.TestCase):
                 self.assertEqual(code, 2)
                 self.assertFalse(output.exists())
                 self.assertEqual(json.loads(stderr)["exit_code"], 2)
+
+    def test_manifest_evident_selection_errors_reject_before_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, manifest = root / "source.img", root / "candidates.jsonl"
+            source.write_bytes(image())
+            self.assertEqual(
+                self._call("scan", str(source), "--manifest", str(manifest))[0], 0
+            )
+            candidate_id = read_manifest_v2(manifest).plans[0].candidate_id
+            cases = (
+                (["--candidate-id", "f" * 64], root / "unknown"),
+                (["--candidate-id", "not-an-id"], root / "malformed"),
+                (
+                    ["--candidate-id", candidate_id, "--candidate-id", candidate_id],
+                    root / "duplicate",
+                ),
+                (["--max-selected-candidates", "1"], root / "limit"),
+                (["--max-output-bytes", "1"], root / "output-limit"),
+            )
+            for index, (extra, output) in enumerate(cases):
+                with mock.patch("exfat_rescue.cli.scan") as scanned:
+                    code, stdout, stderr = self._call(
+                        "recover",
+                        str(source),
+                        "--manifest",
+                        str(manifest),
+                        "--output",
+                        str(output),
+                        *extra,
+                        "--json",
+                    )
+                self.assertEqual(code, 2 if index < 3 else 6)
+                self.assertFalse(scanned.called)
+                self.assertFalse(output.exists())
+                self.assertEqual(stdout, "")
+                self.assertEqual(
+                    json.loads(stderr)["error_code"],
+                    "usage_error" if index < 3 else "resource_limit",
+                )
+
+    def test_manifest_selected_preflight_limits_only_charge_recoverable_selection(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, manifest = root / "source.img", root / "candidates.jsonl"
+            source.write_bytes(image())
+            self.assertEqual(
+                self._call("scan", str(source), "--manifest", str(manifest))[0], 0
+            )
+            plans = read_manifest_v2(manifest).plans
+            recoverable = next(
+                plan for plan in plans if plan.disposition == "recoverable"
+            )
+            refused = next(plan for plan in plans if plan.disposition == "conflicted")
+            output = root / "recoverable-only"
+            with mock.patch("exfat_rescue.cli.scan", wraps=scan) as scanned:
+                code, stdout, _stderr = self._call(
+                    "recover",
+                    str(source),
+                    "--manifest",
+                    str(manifest),
+                    "--output",
+                    str(output),
+                    "--candidate-id",
+                    recoverable.candidate_id,
+                    "--max-output-bytes",
+                    str(recoverable.logical_size_bytes),
+                    "--json",
+                )
+            self.assertEqual(code, 0)
+            self.assertEqual(scanned.call_count, 1)
+            self.assertEqual(json.loads(stdout)["recovered_count"], 1)
+            refusal_output = root / "refusal-only"
+            code, stdout, _stderr = self._call(
+                "recover",
+                str(source),
+                "--manifest",
+                str(manifest),
+                "--output",
+                str(refusal_output),
+                "--candidate-id",
+                refused.candidate_id,
+                "--max-output-bytes",
+                "1",
+                "--json",
+            )
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["recovered_count"], 0)
+            self.assertEqual(payload["conflicted_count"], 1)
+            self.assertEqual(payload["refused_count"], 1)
+            self.assertEqual(payload["failed_count"], 0)
+            self.assertEqual(list((refusal_output / "files").iterdir()), [])
+
+    def test_recovery_completion_reports_selected_disposition_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, output = root / "source.img", root / "output"
+            source.write_bytes(image())
+            code, stdout, _stderr = self._call(
+                "recover", str(source), "--output", str(output), "--json"
+            )
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(
+                {
+                    key: payload[key]
+                    for key in (
+                        "candidate_count",
+                        "recovered_count",
+                        "conflicted_count",
+                        "unrecoverable_count",
+                        "refused_count",
+                        "failed_count",
+                    )
+                },
+                {
+                    "candidate_count": 3,
+                    "recovered_count": 2,
+                    "conflicted_count": 1,
+                    "unrecoverable_count": 0,
+                    "refused_count": 1,
+                    "failed_count": 0,
+                },
+            )
+            records = [
+                json.loads(line)
+                for line in (output / "report.jsonl").read_bytes().splitlines()
+            ]
+            self.assertEqual(
+                [record["disposition"] for record in records[1:-1]],
+                ["conflicted", "recovered", "recovered"],
+            )
+            self.assertEqual(len(list((output / "files").iterdir())), 2)
+            human_output = root / "human-output"
+            code, stdout, _stderr = self._call(
+                "recover", str(source), "--output", str(human_output)
+            )
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                stdout,
+                "Recovery complete: 2 recovered, 1 refused (1 conflicted, 0 "
+                f"unrecoverable), 0 failed. Output: {human_output}\n",
+            )
+
+    def test_incomplete_resume_reports_completion_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, output = root / "source.img", root / "output"
+            source.write_bytes(image())
+            self.assertEqual(
+                self._call("recover", str(source), "--output", str(output))[0], 0
+            )
+            (output / "report.jsonl").unlink()
+            code, stdout, _stderr = self._call(
+                "recover", str(source), "--resume", str(output), "--json"
+            )
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertTrue(payload["resumed"])
+            self.assertEqual(payload["recovered_count"], 2)
+            self.assertEqual(payload["conflicted_count"], 1)
+            self.assertEqual(payload["unrecoverable_count"], 0)
+            self.assertEqual(payload["refused_count"], 1)
+            self.assertEqual(payload["failed_count"], 0)
 
     def test_hostile_manifest_list_type_is_json_manifest_error(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
