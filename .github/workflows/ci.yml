@@ -3,7 +3,19 @@ name: CI
 "on":
   push:
     branches: [main]
+    # These files are not runtime, test, packaging metadata, or recovery-contract inputs.
+    paths-ignore:
+      - AGENTS.md
+      - CHANGELOG.md
+      - docs/PERFORMANCE.md
+      - docs/RELEASE_CHECKLIST.md
   pull_request:
+    # These files are not runtime, test, packaging metadata, or recovery-contract inputs.
+    paths-ignore:
+      - AGENTS.md
+      - CHANGELOG.md
+      - docs/PERFORMANCE.md
+      - docs/RELEASE_CHECKLIST.md
   workflow_dispatch:
 
 permissions:
