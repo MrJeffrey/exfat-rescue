@@ -3,8 +3,29 @@ name: CI
 "on":
   push:
     branches: [main]
+    # These files are not runtime, test, packaging metadata, or recovery-contract inputs.
+    paths-ignore:
+      - AGENTS.md
+      - CHANGELOG.md
+      - docs/PERFORMANCE.md
+      - docs/RELEASE_CHECKLIST.md
   pull_request:
+    # These files are not runtime, test, packaging metadata, or recovery-contract inputs.
+    paths-ignore:
+      - AGENTS.md
+      - CHANGELOG.md
+      - docs/PERFORMANCE.md
+      - docs/RELEASE_CHECKLIST.md
   workflow_dispatch:
+    inputs:
+      profile:
+        description: CI profile to run
+        required: true
+        default: quick
+        type: choice
+        options:
+          - quick
+          - release
 
 permissions:
   contents: read
@@ -17,23 +38,11 @@ jobs:
   test:
     name: ${{ matrix.os }} / Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.profile == 'release' && 20 || 8 }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            python: "3.11"
-          - os: ubuntu-latest
-            python: "3.12"
-          - os: ubuntu-latest
-            python: "3.13"
-          - os: ubuntu-latest
-            python: "3.14"
-          - os: macos-latest
-            python: "3.11"
-          - os: macos-latest
-            python: "3.14"
+        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.profile == 'release' && '[{"os":"ubuntu-latest","python":"3.11"},{"os":"ubuntu-latest","python":"3.12"},{"os":"ubuntu-latest","python":"3.13"},{"os":"ubuntu-latest","python":"3.14"},{"os":"macos-latest","python":"3.11"},{"os":"macos-latest","python":"3.14"}]' || '[{"os":"ubuntu-latest","python":"3.11"}]') }}
     steps:
       - name: Check out the source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -149,6 +158,7 @@ jobs:
           )
 
   unsupported-windows:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.profile == 'release' }}
     name: Windows unsupported-platform message
     runs-on: windows-latest
     timeout-minutes: 10
@@ -207,6 +217,7 @@ jobs:
           PY
 
   real-exfat-integration:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.profile == 'release' }}
     name: real exFAT / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15

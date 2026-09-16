@@ -8,7 +8,10 @@ sources or operate live devices need a separate safety design and are outside th
 Every pull request must explain its recovery-safety impact, add synthetic regression
 coverage, and pass tests against the built wheel. See [SUPPORT.md](SUPPORT.md) for the
 support boundary and [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) for release
-gates.
+gates. Routine CI runs the `quick` profile on Linux/Python 3.11. Before a release, run
+`gh workflow run ci.yml --ref <release-branch-or-tag> -f profile=release` for the exact
+candidate commit. Verify the run's `head_sha` before tagging; the release profile runs
+the full cross-platform, native exFAT, and Windows refusal suite.
 
 ## License and contributions
 
