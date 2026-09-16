@@ -2,6 +2,12 @@
 
 ## 0.2.0rc1 (unreleased)
 
+- Report recovered and refused totals in new and resumed recovery summaries; reject
+  manifest-evident selection and output-limit errors before scanning the image.
+- Keep help and version available on unsupported platforms and explain Linux/macOS
+  requirements before operational commands access files.
+- Provide one recovery quickstart, separate advanced workflows, and explicit output
+  limits in command help.
 - Add `inspect`, v2 `scan`, planner-validated `recover` and `--resume`, `verify`,
   `verify-set`, and `export`, with noninteractive JSON output and optional event logs.
 - Bind recovery manifests and runs to a full SHA-256 of the selected exFAT volume; reparse

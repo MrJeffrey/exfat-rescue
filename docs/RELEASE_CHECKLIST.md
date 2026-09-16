@@ -1,7 +1,14 @@
 # Release checklist
 
-1. Confirm the default branch is protected and every required CI job is green.
+1. Confirm the default branch is protected. Before tagging, run the CI workflow manually
+   with the `release` profile for the exact commit that will receive the release tag and
+   require all nine jobs to pass. The routine `quick` profile is a single Linux/Python
+   3.11 job and does not satisfy the release gate. For example, run
+   `gh workflow run ci.yml --ref <release-branch-or-tag> -f profile=release`, then verify
+   the completed run's `head_sha` is the approved commit before creating the tag.
 2. Run the full hostile-input and synthetic-fixture suite on Linux and macOS.
+   Require exact-byte recovery from native quick-formatted images containing both deleted
+   and former active file metadata. Check the installed wheel's Windows refusal message.
 3. Derive a numeric `SOURCE_DATE_EPOCH` from the release commit, build the sdist and
    wheel twice, and byte-compare each pair. Run `twine check --strict`, inspect their
    contents, and install the wheel in a clean environment outside the source tree.

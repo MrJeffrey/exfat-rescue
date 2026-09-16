@@ -14,7 +14,7 @@ cache behavior varies; tests count the expensive operations directly.
 | `verify --image` | 0 | Independent verification recomputes the digest during its mandatory scan. |
 | `verify-set --image` | 0 for the entire set | Outputs share one scan/replan and must have disjoint selections. |
 
-Every command above still performs one mandatory sequential pass over the allocation
+Every successful command above still performs one mandatory sequential pass over the allocation
 area. That pass detects orphan entries and recomputes the selected-volume content proof
 at the same time. Its 32-byte-aligned entry-type lane is searched in the C-backed regular
 expression engine, so Python parsing runs only for actual File entry markers rather than
@@ -64,7 +64,12 @@ the hint is best-effort and does not change source-validation semantics.
 
 Prefer one adequately bounded `recover` command over many small batches. Use
 `--max-selected-candidates` only after reviewing the candidate count and available space,
-and use `--event-log` for persistent rate and ETA updates. A successful recovery already
+and raise `--max-output-bytes` explicitly if the selected recoverable output exceeds its
+100 GiB default. See the [larger-recovery example](USAGE.md#larger-recovery).
+Use `--event-log` for persistent rate and ETA updates. With a supplied manifest,
+invalid selections and already excessive candidate or output-byte totals are rejected
+before the whole-image scan. A passing preflight still requires the complete current
+inventory scan and global replan. A successful recovery already
 performs source binding, complete metadata replan, extraction hashes, and output
 completion checks. Run image-backed verification later as an independent audit; use
 `verify-set` when existing work is necessarily split across compatible output runs.

@@ -11,12 +11,16 @@ readonly REPOSITORY_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 readonly PYTHON_BIN="${PYTHON_BIN:-python3}"
 readonly KEEP_ARTIFACTS="${EXFAT_RESCUE_INTEGRATION_KEEP:-0}"
 
-tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/exfat-rescue-real.XXXXXXXX")"
+scratch_root="$REPOSITORY_ROOT/.scratch/native-exfat-integration"
+mkdir -p "$scratch_root"
+tmp_root="$(TMPDIR="$scratch_root" mktemp -d "$scratch_root/exfat-rescue-real.XXXXXXXX")"
 image="$tmp_root/disposable-exfat.img"
 mount_root="$tmp_root/mount"
 manifest="$tmp_root/candidates.jsonl"
 output="$tmp_root/recovered"
 resume_output="$tmp_root/resume-output"
+reformat_manifest="$tmp_root/reformat-candidates.jsonl"
+reformat_output="$tmp_root/reformat-recovered"
 image_device=""
 mounted=0
 
@@ -64,15 +68,38 @@ hash_file() {
     fi
 }
 
-format_and_mount() {
-    mkdir "$mount_root"
+native_formatter_evidence() {
+    case "$(uname -s)" in
+        Darwin)
+            printf 'Native formatter: newfs_exfat (%s)\n' "$(sw_vers -productVersion)"
+            ;;
+        Linux)
+            # exfatprogs 1.2.2 prints its version with status 1. Formatting below
+            # remains a separate command whose failure always stops the test.
+            local version_status=0
+            mkfs.exfat -V >&2 || version_status=$?
+            [ "$version_status" -le 1 ]
+            ;;
+    esac
+}
+
+settle_native_mount() {
+    # macOS may create its private volume-event directory immediately after a new
+    # filesystem is mounted.  Let that native bookkeeping allocate first, before the
+    # proof files reserve their clusters.
+    if [ "$(uname -s)" = "Darwin" ]; then
+        sync
+        sleep 1
+    fi
+}
+
+attach_image() {
     case "$(uname -s)" in
         Darwin)
             require_command hdiutil
             require_command newfs_exfat
             # A raw image is attached explicitly as CRawDiskImage, so the image given
             # to exfat-rescue starts at the exFAT boot sector rather than a UDIF header.
-            mkfile -n 64m "$image"
             image_device="$(hdiutil attach -nobrowse -nomount \
                 -imagekey diskimage-class=CRawDiskImage "$image" \
                 | awk '/^\/dev\// {print $1; exit}')"
@@ -80,8 +107,6 @@ format_and_mount() {
                 printf 'Could not attach private raw integration image.\n' >&2
                 exit 1
             }
-            /sbin/newfs_exfat -v EXFATRC "$image_device" >/dev/null
-            /sbin/mount_exfat "$image_device" "$mount_root"
             ;;
         Linux)
             require_command mkfs.exfat
@@ -89,20 +114,57 @@ format_and_mount() {
             require_command losetup
             require_command umount
             require_command sudo
-            truncate -s 64M "$image"
-            mkfs.exfat -n EXFATRC "$image" >/dev/null
             # GitHub's Linux runner kernel does not guarantee an exFAT module.  Use
             # the independently implemented userspace driver against a private loop
             # mapping, then release both in the trap.
             image_device="$(sudo losetup --find --show "$image")"
-            sudo mount.exfat-fuse "$image_device" "$mount_root"
             ;;
         *)
             printf 'Unsupported integration platform: %s\n' "$(uname -s)" >&2
             exit 77
             ;;
     esac
+}
+
+format_mapped_image() {
+    local label="$1"
+    case "$(uname -s)" in
+        Darwin)
+            # Do not pass -R: newfs_exfat preserves the existing raw-image geometry,
+            # while the default format resets only filesystem metadata.
+            /sbin/newfs_exfat -v "$label" "/dev/r${image_device#/dev/}" >/dev/null
+            ;;
+        Linux)
+            # mkfs.exfat defaults to a quick format, leaving non-metadata clusters
+            # available for the reformat recovery case below.
+            sudo mkfs.exfat -n "$label" "$image_device" >/dev/null
+            ;;
+    esac
+}
+
+mount_image() {
+    case "$(uname -s)" in
+        Darwin)
+            /sbin/mount_exfat "$image_device" "$mount_root"
+            ;;
+        Linux)
+            sudo mount.exfat-fuse "$image_device" "$mount_root"
+            ;;
+    esac
     mounted=1
+}
+
+create_format_and_mount() {
+    mkdir "$mount_root"
+    case "$(uname -s)" in
+        Darwin) mkfile -n 64m "$image" ;;
+        Linux) truncate -s 64M "$image" ;;
+    esac
+    attach_image
+    native_formatter_evidence
+    format_mapped_image EXFATRC
+    mount_image
+    settle_native_mount
 }
 
 unmount_image() {
@@ -124,15 +186,19 @@ unmount_image() {
     fi
 }
 
-format_and_mount
+create_format_and_mount
 printf 'active payload\nwith exact bytes\n' > "$mount_root/active.txt"
-printf 'deleted payload\nwith exact bytes\n' > "$mount_root/deleted.txt"
 active_sha="$(hash_file "$mount_root/active.txt")"
-deleted_sha="$(hash_file "$mount_root/deleted.txt")"
-# Keep a later live entry so removal cannot turn the deleted entry's former slot into
-# a terminal end-of-directory marker on implementations that compact directory tails.
-printf 'directory tail\n' > "$mount_root/after-deletion.txt"
-rm "$mount_root/deleted.txt"
+# Place this directory and all proof data beyond quick-format metadata allocation.
+# The tail keeps the deleted set before an EOD marker during the healthy-phase scan.
+dd if=/dev/zero of="$mount_root/filler.bin" bs=1048576 count=8 status=none
+mkdir "$mount_root/reformat-proof"
+printf 'quick reformat payload\nwith exact bytes\n' > "$mount_root/reformat-proof/reformat-target.txt"
+printf 'deleted payload\nwith exact bytes\n' > "$mount_root/reformat-proof/deleted.txt"
+reformat_sha="$(hash_file "$mount_root/reformat-proof/reformat-target.txt")"
+deleted_sha="$(hash_file "$mount_root/reformat-proof/deleted.txt")"
+printf 'directory tail\n' > "$mount_root/reformat-proof/after-deletion.txt"
+rm "$mount_root/reformat-proof/deleted.txt"
 sync
 unmount_image
 
@@ -147,7 +213,7 @@ image_sha_after="$(hash_file "$image")"
     exit 1
 }
 
-"$PYTHON_BIN" - "$manifest" "$output" "$active_sha" "$deleted_sha" <<'PY'
+"$PYTHON_BIN" - "$manifest" "$output" active.txt "$active_sha" <<'PY'
 import hashlib
 import json
 from pathlib import Path
@@ -155,7 +221,7 @@ import sys
 
 manifest_path = Path(sys.argv[1])
 output_root = Path(sys.argv[2])
-expected = {"active.txt": sys.argv[3], "deleted.txt": sys.argv[4]}
+expected = dict(zip(sys.argv[3::2], sys.argv[4::2], strict=True))
 
 manifest_records = [json.loads(line) for line in manifest_path.read_text().splitlines()]
 names = {
@@ -174,29 +240,11 @@ for record in report_records:
     payload = output_root / "files" / candidate_id / "data"
     recovered[names[candidate_id]] = hashlib.sha256(payload.read_bytes()).hexdigest()
 
-if recovered.get("active.txt") != expected["active.txt"]:
-    raise SystemExit("active.txt was not recovered with its exact SHA-256")
-
-# Native formatters differ in whether deletion retains a complete entry set.  If it
-# survives and is recoverable, require an exact recovery; if it was erased or safely
-# refused, report that outcome rather than making the host filesystem's deletion
-# implementation a false product failure.
-deleted_id = next(
-    (candidate_id for candidate_id, name in names.items() if name == "deleted.txt"),
-    None,
-)
-if deleted_id is None:
-    print("deleted entry metadata was not retained by this formatter")
-elif deleted_id in {
-    record["candidate_id"]
-    for record in report_records
-    if record.get("record_type") == "candidate"
-    and record.get("disposition") == "recovered"
-}:
-    if recovered.get("deleted.txt") != expected["deleted.txt"]:
-        raise SystemExit("deleted.txt was not recovered with its exact SHA-256")
-else:
-    print("deleted entry was safely refused by the recovery planner")
+for name, expected_sha in expected.items():
+    if name not in names.values():
+        raise SystemExit(f"{name} was not discovered in the native image")
+    if recovered.get(name) != expected_sha:
+        raise SystemExit(f"{name} was not recovered with its exact SHA-256")
 PY
 
 # A copied completed run becomes detectably incomplete when only its final report is
@@ -210,5 +258,69 @@ image_sha_resume="$(hash_file "$image")"
     printf 'Integration image changed during resume or verification.\n' >&2
     exit 1
 }
+
+# Reformat the populated private image using the same platform-native formatter.  The
+# old proof directory lies after the filler allocation and is therefore discovered by
+# the heap scan as orphaned metadata after the new root directory is initialized.
+attach_image
+format_mapped_image EXFATREFMT
+unmount_image
+
+reformat_image_sha_before="$(hash_file "$image")"
+"$PYTHON_BIN" -m exfat_rescue.cli scan "$image" --manifest "$reformat_manifest" --json > "$tmp_root/reformat-scan.json"
+"$PYTHON_BIN" -m exfat_rescue.cli recover "$image" --manifest "$reformat_manifest" --output "$reformat_output" --json > "$tmp_root/reformat-recover.json"
+"$PYTHON_BIN" -m exfat_rescue.cli verify "$reformat_output" --image "$image" --json > "$tmp_root/reformat-verify.json"
+reformat_image_sha_after="$(hash_file "$image")"
+[ "$reformat_image_sha_before" = "$reformat_image_sha_after" ] || {
+    printf 'Reformatted integration image changed during read-only CLI operations.\n' >&2
+    exit 1
+}
+
+"$PYTHON_BIN" - "$reformat_manifest" "$reformat_output" reformat-target.txt "$reformat_sha" deleted.txt "$deleted_sha" <<'PY'
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+manifest_path = Path(sys.argv[1])
+output_root = Path(sys.argv[2])
+expected = {
+    sys.argv[3]: (sys.argv[4], False),
+    sys.argv[5]: (sys.argv[6], True),
+}
+
+manifest_candidates = [
+    record
+    for record in (json.loads(line) for line in manifest_path.read_text().splitlines())
+    if record.get("record_type") == "candidate"
+]
+
+report_records = [
+    json.loads(line) for line in (output_root / "report.jsonl").read_text().splitlines()
+]
+reports = {
+    record["candidate_id"]: record
+    for record in report_records
+    if record.get("record_type") == "candidate"
+}
+for name, (expected_sha, expected_deleted) in expected.items():
+    candidates = [
+        record for record in manifest_candidates
+        if record["source_candidate"]["name"] == name
+    ]
+    if len(candidates) != 1:
+        raise SystemExit(f"{name} was not uniquely discovered after native quick reformat")
+    candidate = candidates[0]
+    if candidate["source_candidate"]["deleted"] is not expected_deleted:
+        raise SystemExit(f"{name} did not retain its expected deletion state")
+    if candidate["recovery_basis"] != "orphan_contiguous_unallocated":
+        raise SystemExit(f"{name} did not have an unallocated orphan recovery basis")
+    report = reports.get(candidate["candidate_id"])
+    if report is None or report.get("disposition") != "recovered":
+        raise SystemExit(f"{name} was not recovered after native quick reformat")
+    payload = output_root / "files" / candidate["candidate_id"] / "data"
+    if hashlib.sha256(payload.read_bytes()).hexdigest() != expected_sha:
+        raise SystemExit(f"{name} was not recovered with its exact SHA-256 after native quick reformat")
+PY
 
 printf 'Real exFAT integration passed (%s).\n' "$(uname -s)"

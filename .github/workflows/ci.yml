@@ -3,20 +3,17 @@ name: CI
 "on":
   push:
     branches: [main]
-    # These files are not runtime, test, packaging metadata, or recovery-contract inputs.
-    paths-ignore:
-      - AGENTS.md
-      - CHANGELOG.md
-      - docs/PERFORMANCE.md
-      - docs/RELEASE_CHECKLIST.md
   pull_request:
-    # These files are not runtime, test, packaging metadata, or recovery-contract inputs.
-    paths-ignore:
-      - AGENTS.md
-      - CHANGELOG.md
-      - docs/PERFORMANCE.md
-      - docs/RELEASE_CHECKLIST.md
   workflow_dispatch:
+    inputs:
+      profile:
+        description: CI profile to run
+        required: true
+        default: quick
+        type: choice
+        options:
+          - quick
+          - release
 
 permissions:
   contents: read
@@ -29,23 +26,11 @@ jobs:
   test:
     name: ${{ matrix.os }} / Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.profile == 'release' && 20 || 8 }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            python: "3.11"
-          - os: ubuntu-latest
-            python: "3.12"
-          - os: ubuntu-latest
-            python: "3.13"
-          - os: ubuntu-latest
-            python: "3.14"
-          - os: macos-latest
-            python: "3.11"
-          - os: macos-latest
-            python: "3.14"
+        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.profile == 'release' && '[{"os":"ubuntu-latest","python":"3.11"},{"os":"ubuntu-latest","python":"3.12"},{"os":"ubuntu-latest","python":"3.13"},{"os":"ubuntu-latest","python":"3.14"},{"os":"macos-latest","python":"3.11"},{"os":"macos-latest","python":"3.14"}]' || '[{"os":"ubuntu-latest","python":"3.11"}]') }}
     steps:
       - name: Check out the source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -160,7 +145,67 @@ jobs:
             "${wheel_venv}/bin/python" -m unittest discover -s tests -v
           )
 
+  unsupported-windows:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.profile == 'release' }}
+    name: Windows unsupported-platform message
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Build the wheel
+        run: |
+          python -m pip install build==1.6.0
+          python -m build --wheel
+      - name: Check the installed command outside the source tree
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import tempfile
+
+          wheel = next(Path("dist").glob("*.whl")).resolve()
+          with tempfile.TemporaryDirectory(dir=os.environ["RUNNER_TEMP"]) as temporary:
+              root = Path(temporary)
+              subprocess.run([sys.executable, "-m", "venv", str(root / "venv")], check=True)
+              python = root / "venv" / "Scripts" / "python.exe"
+              command = root / "venv" / "Scripts" / "exfat-rescue.exe"
+              subprocess.run(
+                  [str(python), "-m", "pip", "install", "--no-index", "--no-deps", str(wheel)],
+                  check=True,
+              )
+              for prefix in ([str(command)], [str(python), "-m", "exfat_rescue.cli"]):
+                  for arguments in (["--help"], ["--version"]):
+                      result = subprocess.run(prefix + arguments, cwd=root, capture_output=True, text=True)
+                      assert result.returncode == 0, result
+                      assert result.stdout and not result.stderr, result
+                  for as_json in (False, True):
+                      arguments = ["recover", "missing.img", "--output", "unused"]
+                      if as_json:
+                          arguments.append("--json")
+                      result = subprocess.run(prefix + arguments, cwd=root, capture_output=True, text=True)
+                      assert result.returncode == 2, result
+                      assert not result.stdout and "Traceback" not in result.stderr, result
+                      assert "Linux" in result.stderr and "macOS" in result.stderr, result
+                      if as_json:
+                          payload = json.loads(result.stderr)
+                          assert payload["ok"] is False and payload["exit_code"] == 2, payload
+                          assert payload["error_code"] == "usage_error", payload
+                      assert not (root / "unused").exists()
+          PY
+
   real-exfat-integration:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.profile == 'release' }}
     name: real exFAT / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
