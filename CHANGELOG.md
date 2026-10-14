@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0rc1 (unreleased)
+## 0.2.0rc1
 
 - Report recovered and refused totals in new and resumed recovery summaries; reject
   manifest-evident selection and output-limit errors before scanning the image.
