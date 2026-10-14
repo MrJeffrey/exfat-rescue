@@ -408,10 +408,14 @@ their own scan and never consume the resume proof.
 Every recovery-basis class has an exact-byte positive test. Every refusal reason has a
 negative test. Fault injection proves safe resume at every durability boundary. Peak RSS
 is tested against substantially different logical file sizes with a fixed allowed delta.
-Release requires passing Linux/macOS CI, version-recorded tests with native exFAT
-formatters, including a populated image that is quick-formatted again and must yield the
-exact known bytes of both a deleted file and a former active file. These cases use native
-filesystem writes and formatting, without manually rewriting allocation metadata. The
-release also requires reproducible wheel and sdist builds and the recovery validation
-required for the exact release commit. A signed tag and release review are required before any public
-package publication.
+For the 0.2.0rc1 source prerelease, the manual `release` CI run must have all nine jobs
+passing and its `head_sha` must exactly equal the final candidate SHA. That run includes
+Linux/macOS coverage, the Windows refusal check, and native exFAT formatter tests with a
+populated image that is quick-formatted again and must yield the exact known bytes of both
+a deleted file and a former active file. These cases use native filesystem writes and
+formatting, without manually rewriting allocation metadata. Reproducible wheel and sdist
+builds, distribution inspection, and clean installed-wheel tests remain release
+validation only. PyPI publication, uploaded build artifacts, tag signing, and an additional large-media
+recovery trial are outside this source prerelease. Explicit approval for the exact
+validated commit is required before making the repository public, creating the release
+tag, or publishing the GitHub prerelease.

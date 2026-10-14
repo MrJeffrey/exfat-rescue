@@ -189,9 +189,9 @@ def parse_entry_set(
             )
         except (FormatError, IndexError, ValueError):
             # The volume-level RC entrypoint validates mandatory system metadata
-            # before accepting a recovery plan. Keep the legacy scanner able to
-            # report a damaged directory rather than turning an individual entry
-            # parse into an unrelated volume-open failure.
+            # before accepting a recovery plan. Keep directory scanning able to
+            # report a damaged entry rather than turning it into an unrelated
+            # volume-open failure.
             expected_name_hash = struct.unpack_from("<H", stream, 4)[0]
         if expected_name_hash != struct.unpack_from("<H", stream, 4)[0]:
             return None

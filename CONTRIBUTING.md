@@ -5,13 +5,16 @@ lint, and formatting command in [`AGENTS.md`](AGENTS.md). Please file public iss
 sanitized metadata, never a real disk image or recovered file. Features that write
 sources or operate live devices need a separate safety design and are outside this release.
 
-Every pull request must explain its recovery-safety impact, add synthetic regression
-coverage, and pass tests against the built wheel. See [SUPPORT.md](SUPPORT.md) for the
-support boundary and [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) for release
-gates. Routine CI runs the `quick` profile on Linux/Python 3.11. Before a release, run
-`gh workflow run ci.yml --ref <release-branch-or-tag> -f profile=release` for the exact
-candidate commit. Verify the run's `head_sha` before tagging; the release profile runs
-the full cross-platform, native exFAT, and Windows refusal suite.
+Every pull request must explain its recovery-safety impact. Add or update synthetic
+regression coverage when a change affects observable behavior; documentation- and
+comment-only changes need no new tests. Changes must pass the built-wheel validation in
+CI. See [SUPPORT.md](SUPPORT.md) for the support boundary and
+[`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) for release gates. Routine CI
+runs the `quick` profile on Linux/Python 3.11. Before a release, manually run
+`gh workflow run ci.yml --ref <release-branch> -f profile=release` for the final
+candidate commit. Verify the completed run's `head_sha` exactly equals that final commit
+before requesting approval to tag or publish; the release profile runs the full
+cross-platform, native exFAT, and Windows refusal suite.
 
 ## License and contributions
 

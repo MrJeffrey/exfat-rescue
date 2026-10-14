@@ -23,14 +23,17 @@ This tool does not image drives, carve file signatures, or repair file contents.
 
 ## Install
 
-With [pipx](https://pipx.pypa.io/stable/installation/) available:
+For the current development checkout, with
+[pipx](https://pipx.pypa.io/stable/installation/) available:
 
 ```sh
-pipx install git+https://github.com/MrJeffrey/exfat-rescue.git
+git clone https://github.com/MrJeffrey/exfat-rescue.git
+cd exfat-rescue
+pipx install .
 ```
 
-For a local Git checkout, use `pipx install .` instead. The package is not currently
-published on PyPI.
+The package is not published on PyPI. Tagged source-install instructions are published
+with an approved release.
 
 ## Recover and export
 

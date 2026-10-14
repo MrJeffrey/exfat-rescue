@@ -82,7 +82,7 @@ def _metadata_location(
 def _bitmap_allocated(volume: Any, cluster: int) -> bool | None:
     """Adapt the strict system-metadata API while keeping this boundary pure.
 
-    Workstream A supplies ``cluster_is_allocated``.  The small fallback keeps
+    The volume supplies ``cluster_is_allocated``.  The small fallback keeps
     planner unit tests useful with deliberately tiny fake volumes; it is never
     a substitute for the scanner's required system-metadata validation.
     """
