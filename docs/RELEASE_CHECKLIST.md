@@ -1,29 +1,34 @@
-# Release checklist
+# 0.2.0rc1 source prerelease checklist
 
-1. Confirm the default branch is protected. Before tagging, run the CI workflow manually
-   with the `release` profile for the exact commit that will receive the release tag and
-   require all nine jobs to pass. The routine `quick` profile is a single Linux/Python
-   3.11 job and does not satisfy the release gate. For example, run
-   `gh workflow run ci.yml --ref <release-branch-or-tag> -f profile=release`, then verify
-   the completed run's `head_sha` is the approved commit before creating the tag.
-2. Run the full hostile-input and synthetic-fixture suite on Linux and macOS.
-   Require exact-byte recovery from native quick-formatted images containing both deleted
-   and former active file metadata. Check the installed wheel's Windows refusal message.
-3. Derive a numeric `SOURCE_DATE_EPOCH` from the release commit, build the sdist and
-   wheel twice, and byte-compare each pair. Run `twine check --strict`, inspect their
-   contents, and install the wheel in a clean environment outside the source tree.
-4. Confirm README claims match the shipped commands and update `CHANGELOG.md`.
-5. Confirm the wheel and sdist each contain the verbatim Apache-2.0 `LICENSE` and `NOTICE`
-   preserving the sd-recovery MIT notice; confirm package metadata reports Apache-2.0.
-   Confirm `SECURITY.md`, issue forms, and schemas are present and contain no private
-   recovery data.
-6. Confirm Dependabot, secret scanning, push protection, private vulnerability reporting,
-   and required pull-request checks are enabled.
-7. Complete the required recovery validation and approval for the exact release commit.
-   Keep recovery images, recovered data, and other private material out of public release
-   artifacts.
-8. Create a signed release tag from the approved commit.
-9. Verify the public clone URL, Git installation, schema URL, topics, description, and
-   logged-out repository access before announcing source availability.
-10. If publishing to PyPI, use trusted publishing after a separate release review; never
-    store an API token in GitHub. Verify wheel installation from PyPI before announcing it.
+This release is a source-only GitHub prerelease. PyPI publication, uploaded build
+artifacts, tag signing, and an additional large-media recovery trial are outside its
+scope. Build and installed-wheel checks remain required because Git installation builds
+the package.
+
+1. Prepare the release notes and finalize the changelog and version before selecting the
+   release commit. Confirm README commands and the recovery contract match the candidate.
+   Check tracked files and reachable commit metadata for private data; keep recovery
+   images, recovered files, logs, and private validation records out of the repository.
+   Before changing visibility, also review retained Actions runs, logs and artifacts,
+   issues, and pull requests for private data; resolve any exposure before proceeding.
+2. Record the final candidate SHA after review and any merge. Manually run
+   `gh workflow run ci.yml --ref <release-branch> -f profile=release` from a branch pointing
+   at that SHA. Require all nine jobs to pass: six Linux/macOS Python jobs, the Windows
+   unsupported-platform job, and two native exFAT integration jobs. Verify the completed
+   run's `head_sha` matches. Any later commit requires validation of the new candidate.
+3. Retain the workflow's reproducible builds, license and distribution inspection, and
+   clean installed-wheel tests as validation. Do not attach those build artifacts to this
+   source release. Routine `quick` CI does not satisfy the release gate.
+4. Obtain explicit approval for the exact validated commit before making the repository
+   public, creating the release tag, or publishing the GitHub prerelease. At the public
+   transition, require the routine `ubuntu-latest / Python 3.11` check on `main` and enable
+   private vulnerability reporting. Confirm the security-reporting link works.
+5. Create an annotated `v0.2.0rc1` tag at the approved SHA and a GitHub prerelease without
+   uploaded assets. Include this source-install command in the release notes:
+
+   ```sh
+   pipx install 'git+https://github.com/MrJeffrey/exfat-rescue.git@v0.2.0rc1'
+   ```
+
+6. Before announcing the release, verify anonymous repository access, cloning and
+   installation from the tag, schema links, and the repository description and topics.
