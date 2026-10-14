@@ -9,6 +9,8 @@ the package.
    release commit. Confirm README commands and the recovery contract match the candidate.
    Check tracked files and reachable commit metadata for private data; keep recovery
    images, recovered files, logs, and private validation records out of the repository.
+   Before changing visibility, also review retained Actions runs, logs and artifacts,
+   issues, and pull requests for private data; resolve any exposure before proceeding.
 2. Record the final candidate SHA after review and any merge. Manually run
    `gh workflow run ci.yml --ref <release-branch> -f profile=release` from a branch pointing
    at that SHA. Require all nine jobs to pass: six Linux/macOS Python jobs, the Windows
